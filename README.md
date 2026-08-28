@@ -1,9 +1,11 @@
-# Backup infra k3s + Loft + Vault + ArgoCD + n8n
+# Backup infra k3s + Loft + Vault + ArgoCD
 
 Sauvegarde de toute la configuration mise en place sur la VM (k3s hote, vcluster
-`tools` via Loft, Vault, n8n, ArgoCD, pod de creation automatique de VM OCI).
+`tools` via Loft, Vault, ArgoCD, pod de creation automatique de VM OCI).
 But : pouvoir tout reconstruire sans repartir de zero apres une reinstallation
 de la VM.
+
+n8n a ete deploye puis retire de l'infra -- plus de trace ici volontairement.
 
 Un document PDF plus complet (schema d'architecture, explications, pieges
 rencontres) a ete produit en parallele de ce repo pendant la session -- ce
@@ -45,9 +47,8 @@ narrative/pedagogique.
    `configure.sh` (a la main, avec le root token) puis restocker le secret OCI.
 10. `vcluster-tools/oci-tools/` -- appliquer `oci-retry-serviceaccount.yaml`
     puis `oci-retry-pod.yaml` (adapter les OCID a ton tenancy).
-11. `vcluster-tools/n8n/n8n.yaml` -- `kubectl apply -f`.
-12. `vcluster-tools/argocd/install.sh` puis `ingress.yaml`.
-13. `vcluster-tools/demo-app/application.yaml` -- pointe vers le repo
+11. `vcluster-tools/argocd/install.sh` puis `ingress.yaml`.
+12. `vcluster-tools/demo-app/application.yaml` -- pointe vers le repo
     [demo-gitops-app](https://github.com/Marxpo/demo-gitops-app), separe de celui-ci.
 
 ## Contenu
@@ -63,7 +64,6 @@ scripts/
 vcluster-tools/
   vault/          install.sh + configure.sh
   oci-tools/      ServiceAccount + Pod (retry creation VM OCI, secrets via Vault Injector)
-  n8n/            Deployment + Service + PVC
   argocd/         install.sh + ingress.yaml
   demo-app/       Application ArgoCD (pointe vers un repo Git separe)
 ```
