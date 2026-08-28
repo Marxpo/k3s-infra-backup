@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oci-a1-retry
+  namespace: oci-tools
+  annotations:
+    vault.hashicorp.com/agent-inject: "true"
+    vault.hashicorp.com/role: "oci-tools-role"
+    vault.hashicorp.com/agent-inject-secret-config: "secret/data/oci-tools/oci/credentials"
+    vault.hashicorp.com/agent-inject-template-config: |
+      {{- with secret "secret/data/oci-tools/oci/credentials" -}}
+      {{ .Data.data.config }}
+      {{- end }}
+    vault.hashicorp.com/agent-inject-secret-oci_api_key.pem: "secret/data/oci-tools/oci/credentials"
+    vault.hashicorp.com/agent-inject-template-oci_api_key.pem: |
+      {{- with secret "secret/data/oci-tools/oci/credentials" -}}
+      {{ index .Data.data "oci_api_key.pem" }}
+      {{- end }}
+spec:
+  serviceAccountName: oci-retry
+  restartPolicy: Never
+  containers:
+  - name: oci-retry
+    image: ghcr.io/oracle/oci-cli:latest
+    env:
+    - name: OCI_CLI_CONFIG_FILE
+      value: /vault/secrets/config
+    - name: SUPPRESS_LABEL_WARNING
+      value: "True"
+    - name: OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING
+      value: "True"
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        set -u
+        TENANCY="ocid1.tenancy.oc1..aaaaaaaa7yuyhhwcse3ijyfbbromopxesj43p3bir3ulpebes4jyaq5slnma"
+        IMAGE="ocid1.image.oc1.eu-frankfurt-1.aaaaaaaao7qhcfyrevrv7qmvwi2rkyww3lidxgsq3br7gpr6tsq3xueqo5yq"
+        SUBNET="ocid1.subnet.oc1.eu-frankfurt-1.aaaaaaaaeousnmukmigcbean56vr3px6q4l2uyu5pjhlgqyi5b6b7o622i2a"
+        PUBKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAqHb4hICwQzLPTt0enzgfQeRCOOK7g5Snhr0jajz6NI oci-vm-a1-frankfurt"
+        ADS="aHGZ:EU-FRANKFURT-1-AD-1 aHGZ:EU-FRANKFURT-1-AD-2 aHGZ:EU-FRANKFURT-1-AD-3"
+        MAX_CONSECUTIVE_UNEXPECTED=10
+        consecutive_unexpected=0
+        attempt=0
+        while true; do
+          attempt=$((attempt+1))
+          for AD in $ADS; do
+            echo "$(date -Iseconds) Tentative #$attempt sur $AD"
+            RESULT=$(oci compute instance launch \
+              --compartment-id "$TENANCY" \
+              --availability-domain "$AD" \
+              --shape "VM.Standard.A1.Flex" \
+              --shape-config '{"ocpus":2,"memoryInGBs":12}' \
+              --image-id "$IMAGE" \
+              --subnet-id "$SUBNET" \
+              --assign-public-ip true \
+              --display-name "vm-a1-free-frankfurt" \
+              --metadata "{\"ssh_authorized_keys\":\"$PUBKEY\"}" \
+              --output json 2>&1)
+            RC=$?
+            if [ $RC -eq 0 ]; then
+              echo "$(date -Iseconds) SUCCES sur $AD !"
+              echo "$RESULT"
+              sleep infinity
+            fi
+            if echo "$RESULT" | grep -qi "Out of host capacity"; then
+              echo "$(date -Iseconds) $AD: capacite indisponible, on continue"
+              consecutive_unexpected=0
+            elif echo "$RESULT" | grep -qi "LimitExceeded"; then
+              echo "$(date -Iseconds) ERREUR QUOTA - arret definitif"
+              echo "$RESULT"
+              exit 1
+            else
+              consecutive_unexpected=$((consecutive_unexpected+1))
+              echo "$(date -Iseconds) Erreur transitoire ($consecutive_unexpected/$MAX_CONSECUTIVE_UNEXPECTED) sur $AD"
+              echo "$RESULT"
+              if [ $consecutive_unexpected -ge $MAX_CONSECUTIVE_UNEXPECTED ]; then
+                echo "$(date -Iseconds) TROP D'ERREURS CONSECUTIVES - arret pour verification"
+                exit 1
+              fi
+            fi
+            sleep 10
+          done
+          sleep 180
+        done
